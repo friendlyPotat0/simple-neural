@@ -1,0 +1,5 @@
+*.out
+sha256sum.txt
+training-data.txt
+output.log
+a.out

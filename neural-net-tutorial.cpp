@@ -3,13 +3,89 @@
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
 #include <random>
+#include <sstream>
 #include <vector>
 
+using std::ifstream;
 using std::mt19937;
 using std::random_device;
+using std::string;
+using std::stringstream;
 using std::uniform_int_distribution;
 using std::vector;
+
+// Doofus class to read training data from file
+
+class TrainingData {
+  public:
+    TrainingData(const string filename);
+    bool isEOF() { return training_data_file.eof(); }
+    void get_topology(vector<unsigned> &topology);
+    // Returns number of input values read from file
+    unsigned get_next_inputs(vector<double> &input_values);
+    unsigned get_target_outputs(vector<double> &target_values);
+
+  private:
+    ifstream training_data_file;
+};
+
+TrainingData::TrainingData(const string filename) { training_data_file.open(filename.c_str()); }
+
+void TrainingData::get_topology(vector<unsigned> &topology) {
+    string line;
+    string label;
+    getline(training_data_file, line);
+    stringstream ss(line);
+    ss >> label;
+    if (this->isEOF() || label.compare("topology:") != 0) {
+        abort();
+    }
+    while (!ss.eof()) {
+        unsigned i;
+        ss >> i;
+        topology.push_back(i);
+    }
+    return; // !!
+}
+
+unsigned TrainingData::get_next_inputs(vector<double> &input_values) {
+    input_values.clear();
+
+    string line;
+    getline(training_data_file, line);
+    stringstream ss(line);
+
+    string label;
+    ss >> label;
+    if (label.compare("in:") == 0) {
+        double one_value;
+        while (ss >> one_value) {
+            input_values.push_back(one_value);
+        }
+    }
+    return input_values.size();
+}
+
+unsigned TrainingData::get_target_outputs(vector<double> &target_values) {
+    target_values.clear();
+
+    string line;
+    getline(training_data_file, line);
+    stringstream ss(line);
+
+    string label;
+    ss >> label;
+    if (label.compare("out:") == 0) {
+        double one_value;
+        while (ss >> one_value) {
+            target_values.push_back(one_value);
+        }
+    }
+
+    return target_values.size();
+}
 
 struct Connection {
     double weight; // output weights in the neuron to the right
@@ -39,8 +115,8 @@ class Neuron {
     allows the optimizer to continue advancing in the same direction as
     previously, minimizing oscillations and increasing convergence speed */
     static double alpha;
-    static double transfer_function(double n);
-    static double transfer_function_derivative(double n);
+    static double transfer_function(double x);
+    static double transfer_function_derivative(double x);
     static double random_weight();
     double sumDOW(const Layer &next_layer) const;
     double output_value;
@@ -77,6 +153,11 @@ double Neuron::transfer_function(double x) {
     return tanh(x);
 }
 
+double Neuron::transfer_function_derivative(double x) {
+    // tanh derivative
+    return 1.0 - x * x;
+}
+
 void Neuron::update_input_weights(Layer &previous_layer) {
     // The weights to be updated are in the connnection container of the neurons
     // of the previous layer
@@ -97,16 +178,11 @@ double Neuron::sumDOW(const Layer &next_layer) const {
     return sum;
 }
 
-double Neuron::transfer_function_derivative(double x) {
-    // tanh derivative
-    return 1.0 - x * x;
-}
-
 void Neuron::feed_forward(const Layer &previous_layer) {
     double sum = 0.0;
     // Sum the previous layer's outputs
     // Include the bias node from the previous layer
-    for (unsigned i = 0, n = previous_layer.size(); i < n; ++n) {
+    for (unsigned i = 0, n = previous_layer.size(); i < n; ++i) {
         sum += previous_layer.at(i).get_output_value() * previous_layer.at(i).connections.at(index).weight;
     }
     output_value = Neuron::transfer_function(sum);
@@ -128,6 +204,7 @@ class NeuralNetwork {
     void feed_forward(const vector<double> &input_values); // AKA train
     void back_propagation(const vector<double> &target_values);
     void get_results(vector<double> &result_values) const;
+    double get_recent_average_error() const { return recent_average_error; }
 
   private:
     vector<Layer> layers;
@@ -137,14 +214,15 @@ class NeuralNetwork {
 };
 
 NeuralNetwork::NeuralNetwork(const vector<unsigned> &topology) {
-    unsigned layers_number = topology.size();
-    for (unsigned i = 0; i < layers_number; ++i) {
+    for (unsigned i = 0, n = topology.size(); i < n; ++i) {
         layers.push_back(Layer());
-        unsigned outputs_number = i == layers_number - 1 ? 0 : topology.at(i + 1);
+        unsigned outputs_number = i == topology.size() - 1 ? 0 : topology.at(i + 1);
         for (unsigned j = 0, n = topology.at(i); j <= n; ++j) { // <= -> includes bias layer
             layers.back().push_back(Neuron(outputs_number, j));
             printf("Neuron created!\n");
         }
+        // Force the bias node's output value to 1.0
+        layers.back().back().set_output_value(1.0);
     }
 }
 
@@ -164,13 +242,13 @@ void NeuralNetwork::feed_forward(const vector<double> &input_values) {
     // Forward propagation
     for (unsigned i = 1, n = layers.size(); i < n; ++i) {
         Layer &previous_layer = layers.at(i - 1);
-        for (unsigned j = 0; j < layers.at(i).size(); ++j) {
+        for (unsigned j = 0; j < layers.at(i).size() - 1; ++j) {
             layers.at(i).at(j).feed_forward(previous_layer);
         }
     }
 }
 void NeuralNetwork::back_propagation(const vector<double> &target_values) {
-    // Calculate overall neural network error (RMS [root mean square error] of
+    // Calculate overall neural network error (RMSE [root mean square error] of
     // output neuron errors)
     Layer &output_layer = layers.back();
     error = 0.0;
@@ -189,32 +267,58 @@ void NeuralNetwork::back_propagation(const vector<double> &target_values) {
     for (unsigned i = layers.size() - 2; i > 0; --i) {
         Layer &current_layer = layers.at(i);
         Layer &next_layer = layers.at(i + 1);
-        for (unsigned j = 0, n = current_layer.size(); i < n; ++i) {
+        for (unsigned j = 0, n = current_layer.size(); j < n; ++j) {
             current_layer.at(j).calculate_hidden_gradients(next_layer);
         }
     }
     // For all layers from outputs to first hidden layer, update connection
     // weights
     for (unsigned i = layers.size() - 1; i > 0; --i) {
-        Layer &layer = layers.at(i);
+        Layer &current_layer = layers.at(i);
         Layer &previous_layer = layers.at(i - 1);
-        for (unsigned j = 0, n = layer.size() - 1; j < n; ++j) {
-            layer.at(j).update_input_weights(previous_layer);
+        for (unsigned j = 0, n = current_layer.size() - 1; j < n; ++j) {
+            current_layer.at(j).update_input_weights(previous_layer);
         }
     }
 }
 
+void show_vector_values(string label, vector<double> &vec) {
+    printf("%s ", label.c_str());
+    for (unsigned i = 0, n = vec.size(); i < n; ++i) {
+        printf("%.1f ", vec.at(i));
+    }
+    printf("\n");
+}
+
 int main() {
-    vector<unsigned> topology = {3, 2, 1};
+    TrainingData training_data("training-data.txt");
+
+    vector<unsigned> topology;
+    training_data.get_topology(topology);
     NeuralNetwork neural_network(topology);
 
-    vector<double> input_values;
-    neural_network.feed_forward(input_values);
-
-    vector<double> target_values;
-    neural_network.back_propagation(target_values);
-
-    vector<double> result_values;
-    neural_network.get_results(result_values);
+    vector<double> input_values, target_values, result_values;
+    int training_pass = 0;
+    while (!training_data.isEOF()) {
+        ++training_pass;
+        printf("PASS %i\n", training_pass);
+        // Get new input data and feed it forward
+        if (training_data.get_next_inputs(input_values) != topology.at(0)) {
+            break;
+        }
+        show_vector_values("Inputs:", input_values);
+        neural_network.feed_forward(input_values);
+        // Collect the neural network results:
+        neural_network.get_results(result_values);
+        show_vector_values("Outputs:", result_values);
+        // Train the network based on what the outputs should have been
+        training_data.get_target_outputs(target_values);
+        show_vector_values("Targets:", target_values);
+        assert(target_values.size() == topology.back());
+        neural_network.back_propagation(target_values);
+        // Report learning progress
+        printf("Recent average error (RMSE): %f\n\n", neural_network.get_recent_average_error());
+    }
+    printf("\nDone!\n");
     return 0;
 }
