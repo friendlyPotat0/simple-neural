@@ -1,5 +1,3 @@
-// neural-net-tutorial.cpp
-
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -221,7 +219,6 @@ NeuralNetwork::NeuralNetwork(const vector<unsigned> &topology) {
         unsigned outputs_number = i == topology.size() - 1 ? 0 : topology.at(i + 1);
         for (unsigned j = 0, n = topology.at(i); j <= n; ++j) { // <= -> includes bias layer
             layers.back().push_back(Neuron(outputs_number, j));
-            printf("Neuron created!\n");
         }
         // Force the bias node's output value to 1.0
         layers.back().back().set_output_value(1.0);
@@ -287,7 +284,7 @@ void NeuralNetwork::back_propagation(const vector<double> &target_values) {
 void show_vector_values(string label, vector<double> &vec) {
     printf("%s ", label.c_str());
     for (unsigned i = 0, n = vec.size(); i < n; ++i) {
-        printf("%.1f ", vec.at(i));
+        printf("%f ", vec.at(i));
     }
     printf("\n");
 }
