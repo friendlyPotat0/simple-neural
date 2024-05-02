@@ -143,10 +143,9 @@ double Neuron::eta = 0.15;
 double Neuron::alpha = 0.5;
 
 double Neuron::random_weight() {
-    /* mt19937 rng(random_device{}());
+    mt19937 rng(random_device{}());
     uniform_int_distribution<> dist(0, 1);
-    return dist(rng); */
-    return rand() / double(RAND_MAX);
+    return dist(rng);
 }
 
 double Neuron::transfer_function(double x) {
