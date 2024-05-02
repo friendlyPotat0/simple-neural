@@ -143,9 +143,10 @@ double Neuron::eta = 0.15;
 double Neuron::alpha = 0.5;
 
 double Neuron::random_weight() {
-    mt19937 rng(random_device{}());
+    /* mt19937 rng(random_device{}());
     uniform_int_distribution<> dist(0, 1);
-    return dist(rng);
+    return dist(rng); */
+    return rand() / double(RAND_MAX);
 }
 
 double Neuron::transfer_function(double x) {
@@ -210,8 +211,10 @@ class NeuralNetwork {
     vector<Layer> layers;
     double error;
     double recent_average_error;
-    double recent_average_smoothing_factor;
+    static double recent_average_smoothing_factor;
 };
+
+double NeuralNetwork::recent_average_smoothing_factor = 100.0;
 
 NeuralNetwork::NeuralNetwork(const vector<unsigned> &topology) {
     for (unsigned i = 0, n = topology.size(); i < n; ++i) {
